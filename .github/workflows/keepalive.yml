@@ -1,0 +1,24 @@
+# GitHub switches off scheduled workflows in public repositories after
+# 60 days without any activity. This makes one empty commit a month so
+# the reminders never stop silently.
+name: Keep reminders alive
+
+on:
+  schedule:
+    - cron: "17 4 1 * *"     # 1st of every month
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Empty commit
+        run: |
+          git config user.name "daybook-bot"
+          git config user.email "daybook-bot@users.noreply.github.com"
+          git commit --allow-empty -m "keepalive: $(date -u +%Y-%m-%d)"
+          git push
