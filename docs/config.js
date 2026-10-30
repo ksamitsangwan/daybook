@@ -3,6 +3,6 @@
 // database's row-level security, which lets each person see only their own data.
 // NEVER put the secret key (sb_secret_...) in this file.
 window.DAYBOOK_CONFIG = {
-  supabaseUrl: "YOUR_SUPABASE_URL",          // e.g. "https://abcdefghijk.supabase.co"
-  supabaseAnonKey: "YOUR_PUBLISHABLE_KEY"    // starts with sb_publishable_  (an older "anon" key also works)
+  supabaseUrl: "https://esthlcforhwewdyrhsch.supabase.co",          // e.g. "https://abcdefghijk.supabase.co"
+  supabaseAnonKey: "sb_publishable_gv_l6xal8gWn5aQiL-SJuQ_D4iFyrKz"    // starts with sb_publishable_  (an older "anon" key also works)
 };
