@@ -368,34 +368,76 @@ document.addEventListener("visibilitychange",()=>{if(document.visibilityState===
 
 /* ----- sign in ----- */
 function signedOutView(html){document.body.classList.add("signed-out");$("#view").innerHTML=html}
-function showAuth(msg){
+function showAuth(msg,mode){
+  const recover=mode==="newpass";
   signedOutView(`<div class="auth stack"><div class="brand" style="font-size:2rem"><span class="mark" aria-hidden="true" style="width:40px;height:40px;border-radius:12px"><svg viewBox="0 0 16 16" style="width:22px;height:22px"><path d="M3 4h10M3 8h6M3 12h8"/></svg></span>Daybook</div>
-  <div class="muted">Your days, tours and follow-ups in one place. Sign in once on each device; everything stays in sync.</div>
-  <form class="panel" id="auth-form"><div class="stack" style="gap:10px">
-    <label class="field">Email<input id="auth-email" type="email" autocomplete="username" required></label>
-    <label class="field">Password<input id="auth-pass" type="password" autocomplete="current-password" minlength="8" required></label>
+  <div class="muted">${recover?"Choose a new password for your account.":"Your days, tours and follow-ups in one place. Sign in once on each device; everything stays in sync."}</div>
+  <form class="panel" id="auth-form" data-mode="${recover?"newpass":"signin"}"><div class="stack" style="gap:10px">
+    ${recover?"":`<label class="field">Email<input id="auth-email" type="email" autocomplete="username" required></label>`}
+    <label class="field">${recover?"New password":"Password"}<input id="auth-pass" type="password" autocomplete="${recover?"new-password":"current-password"}" minlength="8" required></label>
+    <label class="row" style="gap:8px;font-size:.9rem;color:var(--muted)"><input type="checkbox" id="auth-show" style="width:auto;min-height:0"> Show password</label>
     <div id="auth-msg" role="alert" style="color:var(--late);font-size:.88rem">${esc(msg||"")}</div>
-    <div class="row"><button class="primary" type="submit">Sign in</button><button type="button" id="auth-create">Create account</button></div>
-    <div class="hint">Create the account once, confirm it from the email, then sign in on each device.</div></div></form></div>`);
+    ${recover?`<div class="row"><button class="primary" type="submit">Save new password</button></div>`:
+    `<div class="row"><button class="primary" type="submit">Sign in</button><button type="button" id="auth-create">Create account</button></div>
+    <div class="row"><button type="button" class="link" id="auth-forgot" style="padding:0;min-height:0;border:0;background:none;color:var(--accent);text-decoration:underline">Forgot password?</button></div>
+    <div class="hint">New here? Type your email and a password (8+ characters), then tap Create account and confirm from the email. Check Spam if it doesn't arrive.</div>`}</div></form></div>`);
+  $("#auth-show").addEventListener("change",e=>{$("#auth-pass").type=e.target.checked?"text":"password"});
+  const f=$("#auth-forgot");if(f)f.addEventListener("click",forgotPassword);
+}
+const APP_HOME=location.origin+location.pathname;
+function authMsg(text,kind){const m=$("#auth-msg");if(!m)return;m.style.color=kind==="ok"?"var(--ok)":kind==="busy"?"var(--muted)":"var(--late)";m.textContent=text}
+function authBusy(on){document.querySelectorAll("#auth-form button").forEach(b=>b.disabled=on)}
+function friendlyAuthError(m){
+  m=String(m||"");
+  if(/invalid login/i.test(m))return "Email or password is wrong. New here? Tap Create account first.";
+  if(/not confirmed/i.test(m))return "Your email isn't confirmed yet. Open the confirmation email (check Spam) and tap its link, then sign in.";
+  if(/already registered|already exists/i.test(m))return "An account with this email already exists. Sign in, or tap Forgot password.";
+  if(/rate limit|too many/i.test(m))return "Too many emails sent in the last hour. Wait a while and try again.";
+  if(/signups? not allowed|disabled/i.test(m))return "New accounts are switched off for this Daybook.";
+  if(/fetch|network|load failed/i.test(m))return "Can't reach the database. Check your internet connection and try again.";
+  return m;
+}
+async function authCall(busyText,fn){
+  authMsg(busyText,"busy");authBusy(true);
+  const slow=setTimeout(()=>authMsg(busyText+" (still working, this can take up to a minute)","busy"),8000);
+  try{return await fn()}catch(e){return{error:e}}finally{clearTimeout(slow);authBusy(false)}
 }
 async function authSubmit(create){
-  const email=$("#auth-email").value.trim(),password=$("#auth-pass").value,msg=$("#auth-msg");
-  if(!email||password.length<8){msg.textContent="Enter your email and a password of at least 8 characters.";return}
-  msg.style.color="var(--muted)";msg.textContent=create?"Creating your account…":"Signing in…";
-  const {data,error}=create?await sb.auth.signUp({email,password}):await sb.auth.signInWithPassword({email,password});
-  msg.style.color="var(--late)";
-  if(error){msg.textContent=/invalid login/i.test(error.message)?"Email or password is wrong.":error.message;return}
-  if(create&&!data.session){msg.style.color="var(--ok)";msg.textContent="Account created. Open the confirmation email, tap the link, then sign in here.";return}
+  const form=$("#auth-form");
+  if(form&&form.dataset.mode==="newpass")return saveNewPassword();
+  const email=$("#auth-email").value.trim(),password=$("#auth-pass").value;
+  if(!email||password.length<8){authMsg("Enter your email and a password of at least 8 characters.");return}
+  const {data,error}=await authCall(create?"Creating your account…":"Signing in…",()=>create?sb.auth.signUp({email,password,options:{emailRedirectTo:APP_HOME}}):sb.auth.signInWithPassword({email,password}));
+  if(error){authMsg(friendlyAuthError(error.message));return}
+  if(create&&!data.session){
+    if(data.user&&Array.isArray(data.user.identities)&&!data.user.identities.length){authMsg(friendlyAuthError("already registered"));return}
+    authMsg("Account created. We've emailed "+email+": open it (check Spam), tap the link, then sign in here.","ok");return}
   startSession(data.user);
 }
-function startSession(u){if(user&&user.id===u.id)return;user=u;document.body.classList.remove("signed-out");loadLocal();loadAll();subscribe()}
+async function forgotPassword(){
+  const email=($("#auth-email").value||"").trim();
+  if(!email){authMsg("Type your email above first, then tap Forgot password.");return}
+  const {error}=await authCall("Sending a reset link…",()=>sb.auth.resetPasswordForEmail(email,{redirectTo:APP_HOME}));
+  if(error){authMsg(friendlyAuthError(error.message));return}
+  authMsg("If "+email+" has an account, a reset link is on its way (check Spam). Open it on this device.","ok");
+}
+let recovering=/type=recovery/.test(location.hash);
+async function saveNewPassword(){
+  const password=$("#auth-pass").value;
+  if(password.length<8){authMsg("Use at least 8 characters.");return}
+  const {data,error}=await authCall("Saving…",()=>sb.auth.updateUser({password}));
+  if(error){authMsg(friendlyAuthError(error.message));return}
+  recovering=false;history.replaceState(null,"",APP_HOME);toast("Password changed");startSession(data.user);
+}
+function startSession(u){if(recovering){showAuth("","newpass");return}if(user&&user.id===u.id)return;user=u;document.body.classList.remove("signed-out");loadLocal();loadAll();subscribe()}
 async function connect(){
   if(!window.supabase||!CFG.supabaseUrl||/YOUR_/.test(String(CFG.supabaseUrl)+String(CFG.supabaseAnonKey))){
     signedOutView(`<div class="auth panel"><h2>Almost there</h2><p>This copy of Daybook isn't connected to your database yet. Put your Supabase Project URL and publishable key in <span class="mono">docs/config.js</span>, then reload.</p></div>`);return}
   sb=window.supabase.createClient(CFG.supabaseUrl,CFG.supabaseAnonKey,{auth:{persistSession:true,autoRefreshToken:true}});
   sb.auth.onAuthStateChange((ev,session)=>{
+    if(ev==="PASSWORD_RECOVERY"){recovering=true;setTimeout(()=>showAuth("","newpass"),0);return}
     if(ev==="SIGNED_OUT"){user=null;synced=false;if(channel)sb.removeChannel(channel);COLS.forEach(c=>S[c]=new Map());showAuth()}
-    else if(session&&session.user)startSession(session.user)});
+    else if(session&&session.user)setTimeout(()=>startSession(session.user),0)});
   const {data}=await sb.auth.getSession();
   if(data.session)startSession(data.session.user);else showAuth();
 }
