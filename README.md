@@ -2,6 +2,7 @@
 
 A personal planner and tour log you install on your iPhone and Mac. It runs on free services you control:
 
+- **Priorities (Covey's time matrix):** every task lands in Q1–Q4 from *important?* (your call) and *urgent?* (from the due date, with override and 🔥 burning), a Matrix view, a daily **Top 3** (80/20) and a protected **Q2 block**, delegation with follow-up dates, a weekly quadrant report, and weekly big rocks by role
 - **Time-blocked days** with a timeline, a "now" line and a load bar that warns when the day doesn't fit
 - **Tasks with steps**, saved step lists for standard processes, and flags for tasks that are untouched or keep getting pushed back
 - **Tour log**: stops, activities, observations, follow-ups that become tasks, odometer or km per leg
@@ -24,8 +25,8 @@ schema.sql                      run once in Supabase SQL Editor (one table, row-
 docs/index.html                 the app
 docs/config.js                  your Supabase URL + publishable key go here
 docs/manifest.webmanifest       home-screen app settings
-reminders/reminders.py          overdue tasks, late steps, untouched tasks, close the day, trip details
-reminders/test_*.py             22 tests (python -m pytest reminders)
+reminders/reminders.py          burning, Top 3, overdue, late steps, follow-ups, untouched, close the day, Q2, trip details
+reminders/test_*.py             28 tests (python -m pytest reminders)
 tools/backup.py                 export/restore all data as JSON (same format as the app's Export button)
 .github/workflows/reminders.yml runs reminders.py 4 times a day
 .github/workflows/keepalive.yml stops GitHub from pausing the schedule
@@ -42,7 +43,7 @@ means a signed-in person only ever sees their own rows.
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-python -m pytest reminders                      # 22 tests
+python -m pytest reminders                      # 28 tests
 export SUPABASE_URL="https://xxxx.supabase.co"
 export SUPABASE_SERVICE_KEY="sb_secret_..."
 python reminders/reminders.py --dry-run --ignore-quiet

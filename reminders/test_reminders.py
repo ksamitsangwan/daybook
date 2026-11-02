@@ -159,3 +159,71 @@ def test_running_and_old_tours():
     assert [(t["date"], m) for t, m in found] == [("2026-10-26", 1), ("2026-10-27", "running")]
     _, body, _ = build_message([], EVENING, tours=found)
     assert body.splitlines() == ["Trip details to complete:", "• Mon 26 Oct — 1 item missing", "• Tue 27 Oct, NFR visits — still running, end it"]
+
+
+# ---------- priorities (Covey quadrants, Top 3, follow-ups, Q2) ----------
+from reminders import (quadrant, find_burning, find_followups, top3_today, q2_done_today, next_q2,
+                       find_overdue as _fo, build_message as _bm)
+
+_NOW = datetime(2026, 11, 2, 8, 36, tzinfo=ZoneInfo("Asia/Kolkata"))
+
+
+def _t(i, **kw):
+    base = {"_id": i, "_user": "u1", "title": i, "status": "open"}
+    base.update(kw)
+    return base
+
+
+def test_quadrants_match_the_app():
+    assert quadrant(_t("a", important=True, due="2026-11-03"), _NOW) == 1      # due tomorrow = urgent
+    assert quadrant(_t("b", important=True, due="2026-11-06"), _NOW) == 2
+    assert quadrant(_t("c", important=False, due="2026-11-02"), _NOW) == 3
+    assert quadrant(_t("d", important=False), _NOW) == 4
+    assert quadrant(_t("e"), _NOW) == 0                                         # not sorted yet
+    assert quadrant(_t("f", priority=1), _NOW) == 2                             # old "Must" = important
+    assert quadrant(_t("g", important=True, due="2026-11-03", urgency="no"), _NOW) == 2   # MIS override
+    assert quadrant(_t("h", important=True, due="2026-11-01", urgency="no"), _NOW) == 1   # overdue wins
+    assert quadrant(_t("i", important=True, burningOn="2026-11-02"), _NOW) == 1
+
+
+def test_burning_and_followups():
+    tasks = [_t("fire", burningOn="2026-11-02", important=True), _t("old", burningOn="2026-11-01"),
+             _t("del", delegateTo="Ravi", followUp="2026-11-02"), _t("later", delegateTo="Ravi", followUp="2026-11-05")]
+    assert [t["_id"] for t in find_burning(tasks, _NOW)] == ["fire"]
+    assert [t["_id"] for t in find_followups(tasks, _NOW)] == ["del"]
+
+
+def test_top3_picked_or_suggested():
+    tasks = [_t("x", important=True, due="2026-11-02"), _t("y", important=True), _t("z", important=False, due="2026-11-02"),
+             _t("w", important=True, status="done")]
+    picked, sug = top3_today(tasks, {"top3": ["x", "w"]}, _NOW)
+    assert [t["_id"] for t in picked] == ["x"] and sug == []
+    picked, sug = top3_today(tasks, None, _NOW)
+    assert picked == [] and [t["_id"] for t in sug] == ["x", "y"]
+
+
+def test_q2_done_today_and_next():
+    ms = int(_NOW.timestamp() * 1000)
+    assert q2_done_today([_t("a", status="done", doneQ=2, doneAt=ms)], _NOW)
+    assert not q2_done_today([_t("a", status="done", doneQ=1, doneAt=ms)], _NOW)
+    assert q2_done_today([_t("b", important=True, steps=[{"done": True, "doneAt": ms}])], _NOW)
+    assert next_q2([_t("q", important=True, due="2026-11-09"), _t("r", important=False)], _NOW)["_id"] == "q"
+
+
+def test_message_puts_burning_and_top3_first():
+    burning = [_t("Outlet stock issue", burningOn="2026-11-02", important=True)]
+    top3 = [_t("Submit MIS"), _t("Plan R&R steps")]
+    fu = [_t("Get dealer quotes", delegateTo="Ravi", followUp="2026-11-02")]
+    title, body, prio = _bm([], _NOW, burning=burning, top3=top3, followups=fu)
+    lines = body.splitlines()
+    assert title == "Daybook: 1 burning task" and prio == "high"
+    assert lines[0].startswith("🔥 Outlet stock issue") and lines[1].startswith("Today's Top 3")
+    assert "★ Submit MIS" in lines and "• Follow up with Ravi: Get dealer quotes" in lines
+    title, body, _ = _bm([], _NOW, suggest=[_t("Plan R&R steps")])
+    assert title == "Daybook: today's Top 3" and "☆ Plan R&R steps" in body
+
+
+def test_overdue_sorted_by_importance():
+    a = _t("not imp", important=False, due="2026-10-30")
+    b = _t("imp", important=True, due="2026-11-01")
+    assert [t["_id"] for t in _fo([a, b], _NOW)] == ["imp", "not imp"]

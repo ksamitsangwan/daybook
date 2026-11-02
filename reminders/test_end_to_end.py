@@ -80,6 +80,7 @@ def test_evening_run_sends_one_push_and_counts_reminders(monkeypatch):
         "Untouched:", "• Lease note — 8 days",
         "Trip details to complete:", "• Tue 27 Oct — 1 item missing",
         "Close your day in Daybook: 1 item still open for today",
+        "No Q2 work today (important, not urgent). Plan a Q2 block for tomorrow.",
         "Open Daybook to act on these."]
     task = next(r for r in fake.rows if r["id"] == "t1")["data"]
     assert task["remindCount"] == 2 and task["title"] == "Reply on NFR file" and "lastReminded" in task

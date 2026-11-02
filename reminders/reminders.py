@@ -6,7 +6,11 @@ to your phone through ntfy listing:
   - overdue tasks and late steps (reminders repeat on every run until closed),
   - tasks untouched for 5+ days,
   - from 5 pm: a nudge to close the day if you haven't,
-  - from 8 pm: tours from the last 7 days with missing trip details.
+  - from 8 pm: tours from the last 7 days with missing trip details,
+  - always first: burning tasks (marked 🔥 for today),
+  - mornings: today's Top 3 (or suggestions if you haven't picked them),
+  - delegated tasks whose follow-up date has come,
+  - from 8 pm: a nudge if no important-but-not-urgent (Q2) work got done today.
 It adds 1 to remindCount on each overdue task, so you can see how often it was nagged.
 
 Settings come from environment variables (GitHub stores them as Secrets):
@@ -107,9 +111,101 @@ def late_label(task: dict, now: datetime) -> str:
     return f"{late // 60}h late" if late >= 60 else f"{late}m late"
 
 
+def importance(task: dict) -> bool | None:
+    """True/False as set in the app; old tasks count as important only if priority was 1."""
+    imp = task.get("important")
+    if imp is True or imp is False:
+        return imp
+    return True if task.get("priority") == 1 else None
+
+
+def is_burning(task: dict, now: datetime) -> bool:
+    return is_open(task) and task.get("burningOn") == now.date().isoformat()
+
+
+def is_urgent(task: dict, now: datetime) -> bool:
+    """Same rule as the app: burning, overdue, forced by hand, or due today/tomorrow."""
+    if not is_open(task):
+        return False
+    if is_burning(task, now):
+        return True
+    due = _day(task["due"]) if task.get("due") else None
+    if due and due < now.date():
+        return True
+    if due == now.date():
+        m = _minutes(task.get("dueTime"))
+        if m is not None and m < now.hour * 60 + now.minute:
+            return True
+    if task.get("urgency") == "yes":
+        return True
+    if task.get("urgency") == "no":
+        return False
+    return due is not None and (due - now.date()).days <= 1
+
+
+def quadrant(task: dict, now: datetime) -> int:
+    """Covey quadrant 1-4, or 0 when importance hasn't been decided yet."""
+    imp = importance(task)
+    if imp is None:
+        return 0
+    urg = is_urgent(task, now)
+    return (1 if urg else 2) if imp else (3 if urg else 4)
+
+
+QRANK = {1: 1, 2: 2, 0: 3, 3: 4, 4: 5}
+
+
+def prio_key(task: dict, now: datetime) -> tuple:
+    return (0 if is_burning(task, now) else QRANK[quadrant(task, now)], str(task.get("due") or "9999"),
+            task.get("dueTime") or "", task.get("priority") or 3)
+
+
 def find_overdue(tasks: list[dict], now: datetime) -> list[dict]:
     overdue = [t for t in tasks if is_overdue(t, now)]
-    return sorted(overdue, key=lambda t: (t.get("priority") or 3, str(t["due"]), t.get("dueTime") or ""))
+    return sorted(overdue, key=lambda t: prio_key(t, now))
+
+
+def find_burning(tasks: list[dict], now: datetime) -> list[dict]:
+    return [t for t in tasks if is_burning(t, now)]
+
+
+def find_followups(tasks: list[dict], now: datetime) -> list[dict]:
+    """Delegated tasks whose follow-up date has come."""
+    out = [t for t in tasks if is_open(t) and t.get("delegateTo") and t.get("followUp")
+           and _day(t["followUp"]) <= now.date()]
+    return sorted(out, key=lambda t: str(t["followUp"]))
+
+
+def top3_today(tasks: list[dict], day_doc: dict | None, now: datetime) -> tuple[list[dict], list[dict]]:
+    """(picked Top 3 still open, suggestions when none were picked)."""
+    by_id = {t.get("_id"): t for t in tasks}
+    picked = [by_id[i] for i in (day_doc or {}).get("top3") or [] if i in by_id]
+    if picked:
+        return [t for t in picked if is_open(t)], []
+    horizon = now.date().toordinal() + 7
+    cands = [t for t in tasks if is_open(t) and importance(t) is True and not is_burning(t, now)
+             and not t.get("delegateTo") and (not t.get("due") or _day(t["due"]).toordinal() <= horizon)]
+    return [], sorted(cands, key=lambda t: prio_key(t, now))[:3]
+
+
+def q2_done_today(tasks: list[dict], now: datetime, tz=None) -> bool:
+    """True if any Q2 task was finished today, or a step of an important task was ticked today."""
+    day = now.date()
+
+    def on_day(ms) -> bool:
+        return bool(ms) and datetime.fromtimestamp(ms / 1000, tz or now.tzinfo).date() == day
+
+    for t in tasks:
+        if t.get("status") == "done" and t.get("doneQ") == 2 and on_day(t.get("doneAt")):
+            return True
+        if importance(t) is True and any(s.get("done") and on_day(s.get("doneAt")) for s in t.get("steps") or []):
+            return True
+    return False
+
+
+def next_q2(tasks: list[dict], now: datetime) -> dict | None:
+    q2 = [t for t in tasks if is_open(t) and quadrant(t, now) == 2]
+    return sorted(q2, key=lambda t: prio_key(t, now))[0] if q2 else None
 
 
 def step_title(step: dict) -> str:
@@ -131,7 +227,7 @@ def find_late_steps(tasks: list[dict], now: datetime) -> list[tuple[dict, dict]]
         for s in t.get("steps") or []:
             if not s.get("done") and s.get("due") and _day(s["due"]) < now.date():
                 out.append((t, s))
-    return sorted(out, key=lambda ts: (ts[0].get("priority") or 3, str(ts[1]["due"])))
+    return sorted(out, key=lambda ts: (prio_key(ts[0], now), str(ts[1]["due"])))
 
 
 def untouched_days(task: dict, now: datetime) -> int:
@@ -189,16 +285,33 @@ def find_incomplete_tours(tours: list[dict], now: datetime) -> list[tuple[dict, 
 
 
 def build_message(overdue: list[dict], now: datetime, late_steps=(), untouched=(), tours=(),
-                  close_day: int | None = None) -> tuple[str, str, str]:
-    """Return (title, body, priority) for the push notification."""
+                  close_day: int | None = None, burning=(), top3=(), suggest=(), followups=(),
+                  q2_nudge: dict | None | bool = None) -> tuple[str, str, str]:
+    """Return (title, body, priority) for the push notification.
+
+    q2_nudge: None = no nudge; False = nudge with no Q2 task to suggest; a task = nudge naming it.
+    """
     lines: list[str] = []
     n_tasks, n_steps = len(overdue), len(late_steps)
+    for t in burning:
+        lines.append(f"🔥 {t['title']} (burning today)")
+    if top3:
+        lines.append("Today's Top 3 (do these first):")
+        lines += [f"★ {t['title']}" for t in top3]
+    elif suggest:
+        lines.append("Pick today's Top 3. Suggested:")
+        lines += [f"☆ {t['title']}" for t in suggest]
+    burning_ids = {id(t) for t in burning}
     for t in overdue:
+        if id(t) in burning_ids:
+            continue
         count = (t.get("remindCount") or 0) + 1
         lines.append(f"• {t['title']} — {late_label(t, now)} (reminder #{count}){step_progress(t)}")
     for t, s in late_steps:
         days = (now.date() - _day(s["due"])).days
         lines.append(f"• Step: {step_title(s)} (in {t['title']}) — {days}d late")
+    for t in followups:
+        lines.append(f"• Follow up with {t['delegateTo']}: {t['title']}")
     if untouched:
         lines.append("Untouched:")
         lines += [f"• {t['title']} — {d} days" for t, d in list(untouched)[:3]]
@@ -212,21 +325,31 @@ def build_message(overdue: list[dict], now: datetime, late_steps=(), untouched=(
     if close_day is not None:
         lines.append(f"Close your day in Daybook: {close_day} item{'s' if close_day != 1 else ''} still open for today" if close_day
                      else "Close your day in Daybook: log what you did and set tomorrow's first task")
+    if q2_nudge is not None:
+        lines.append("No Q2 work today (important, not urgent)." + (f" Block time tomorrow for: {q2_nudge['title']}" if q2_nudge else " Plan a Q2 block for tomorrow."))
     if len(lines) > MAX_LINES:
         lines = lines[: MAX_LINES - 1] + [f"+{len(lines) - MAX_LINES + 1} more"]
 
-    if n_tasks or n_steps:
+    if burning:
+        title = f"Daybook: {len(burning)} burning task" + ("" if len(burning) == 1 else "s")
+    elif n_tasks or n_steps:
         title = f"Daybook: {n_tasks} overdue task" + ("" if n_tasks == 1 else "s") if n_tasks else "Daybook:"
         if n_steps:
             title = (title + ", " if n_tasks else "Daybook: ") + f"{n_steps} late step" + ("" if n_steps == 1 else "s")
+    elif top3 or suggest:
+        title = "Daybook: today's Top 3"
+    elif followups:
+        title = f"Daybook: {len(followups)} follow-up" + ("" if len(followups) == 1 else "s") + " due"
     elif tours:
         title = "Daybook: trip details to complete"
     elif close_day is not None:
         title = "Daybook: close your day"
+    elif q2_nudge is not None:
+        title = "Daybook: no Q2 work today"
     else:
         title = "Daybook: untouched tasks"
     involved = list(overdue) + [t for t, _ in late_steps]
-    urgent = any((t.get("priority") or 3) == 1 or (t.get("remindCount") or 0) >= 2 for t in involved)
+    urgent = bool(burning) or any(importance(t) is True or (t.get("remindCount") or 0) >= 2 for t in involved)
     return title, "\n".join(lines), ("high" if urgent else "default")
 
 
@@ -303,16 +426,25 @@ def main(argv: list[str] | None = None) -> int:
     overdue, late = find_overdue(tasks, now), find_late_steps(tasks, now)
     untouched = find_untouched(tasks, now)
     tours = find_incomplete_tours(db.docs("tours"), now) if now.hour >= 20 else []
+    burning, followups = find_burning(tasks, now), find_followups(tasks, now)
+    today = now.date().isoformat()
+    days = db.docs("days") if now.hour < 12 or now.hour >= 17 else []
+    day_doc = next((d for d in days if d.get("_id") == today), None)
+    top3, suggest = top3_today(tasks, day_doc, now) if now.hour < 12 else ([], [])
     close_day = None
-    if now.hour >= 17:
-        today = now.date().isoformat()
-        if not any(d.get("_id") == today and d.get("closed") for d in db.docs("days")):
-            close_day = open_due_count(tasks, now)
+    if now.hour >= 17 and not (day_doc or {}).get("closed"):
+        close_day = open_due_count(tasks, now)
+    q2_nudge = None
+    if now.hour >= 20 and not q2_done_today(tasks, now):
+        q2_nudge = next_q2(tasks, now) or False
 
-    if not (overdue or late or untouched or tours or close_day is not None):
+    if not (overdue or late or untouched or tours or close_day is not None or burning or top3 or suggest
+            or followups or q2_nudge is not None):
         print("Nothing to remind.")
         return 0
-    title, body, priority = build_message(overdue, now, late, untouched, tours, close_day)
+    title, body, priority = build_message(overdue, now, late, untouched, tours, close_day,
+                                          burning=burning, top3=top3, suggest=suggest,
+                                          followups=followups, q2_nudge=q2_nudge)
     print(f"{title} [{priority}]\n{body}")
     if args.dry_run:
         print("(dry run: nothing sent or changed)")

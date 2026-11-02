@@ -186,6 +186,40 @@ button:disabled{opacity:.35;cursor:default}
 .chipbtn{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:5px 11px;font-size:.82rem;font-weight:500}
 .chipbtn[aria-pressed="true"]{background:var(--ok-soft);border-color:var(--ok);color:var(--ok)}
 .chipbtn.add{border-style:dashed;color:var(--muted)}
+.qchip{font-family:var(--mono);font-size:.68rem;font-weight:700;padding:2px 6px;border-radius:6px;white-space:nowrap}
+.qchip.q1{background:var(--late-soft);color:var(--late)} .qchip.q2{background:var(--ok-soft);color:var(--ok)}
+.qchip.q3{background:var(--warn-soft);color:var(--warn)} .qchip.q4{background:var(--sunk);color:var(--muted)}
+.qchip.q0{background:transparent;color:var(--muted);border:1px dashed var(--line)}
+.matrix{display:grid;grid-template-columns:1fr;gap:12px}
+@media (min-width:860px){.matrix{grid-template-columns:1fr 1fr}}
+.matrix .panel{border-top:4px solid var(--line)}
+.matrix .mq1{border-top-color:var(--late)} .matrix .mq2{border-top-color:var(--ok)} .matrix .mq3{border-top-color:var(--warn)} .matrix .mq4{border-top-color:var(--muted)}
+.qhead{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
+.qhead h2{margin:0}
+.qsub{font-size:.8rem;color:var(--muted)}
+.seg{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.seg .seg-l{min-width:6.5rem;font-size:.86rem;color:var(--muted)}
+.seg button{padding:6px 12px;font-size:.86rem;min-height:36px}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.plan{border-left:4px solid var(--ok)}
+.plan .burn{display:flex;gap:10px;align-items:center;padding:8px 10px;margin:4px 0;border-radius:10px;background:var(--late-soft)}
+.plan ol.t3{list-style:none;margin:0;padding:0}
+.plan .sug{display:flex;gap:8px;align-items:center;padding:6px 0;border-top:1px dashed var(--line)}
+.q2band{position:absolute;left:0;right:0;background:repeating-linear-gradient(135deg,var(--ok-soft) 0 8px,transparent 8px 16px);border-top:2px dashed var(--ok);border-bottom:2px dashed var(--ok);color:var(--ok);font-size:.72rem;font-weight:600;padding:2px 8px;pointer-events:none;z-index:0}
+.lane .block{z-index:1}
+.qbar{display:flex;height:12px;border-radius:6px;overflow:hidden;background:var(--sunk);min-width:120px;flex:1}
+.qbar i{display:block;height:100%} .qbar .b1{background:var(--late)} .qbar .b2{background:var(--ok)} .qbar .b3{background:var(--warn)} .qbar .b4{background:var(--muted)}
+.qrow{display:flex;gap:10px;align-items:center;padding:5px 0;font-size:.86rem}
+.qrow .wk{width:4.8rem;flex:none;color:var(--muted)}
+.qleg{display:flex;flex-wrap:wrap;gap:10px;font-size:.78rem;color:var(--muted)}
+.qleg b{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:4px;vertical-align:-1px}
+details.guide summary{cursor:pointer;font-weight:600;list-style:none}
+details.guide summary::-webkit-details-marker{display:none}
+details.guide summary::before{content:"▸ ";color:var(--accent)} details.guide[open] summary::before{content:"▾ "}
+.guide ul{margin:6px 0;padding-left:1.2em;display:flex;flex-direction:column;gap:4px}
+.qgrid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:8px 0;font-size:.82rem}
+.qgrid div{border-radius:10px;padding:8px}
+.qgrid .g1{background:var(--late-soft)} .qgrid .g2{background:var(--ok-soft)} .qgrid .g3{background:var(--warn-soft)} .qgrid .g4{background:var(--sunk)}
 .actchips{display:flex;flex-wrap:wrap;gap:6px}
 .stops{display:flex;flex-direction:column;gap:10px}
 .stop{border:1px solid var(--line);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:10px;background:var(--bg);min-width:0}
@@ -337,7 +371,7 @@ async function save(col,id,data){
 }
 async function patch(col,id,part){
   const cur=S[col].get(id)||{};
-  if(col==="tasks"){const st=stampTask(cur,Object.assign({},cur,part));part=Object.assign({},part,{touchedAt:st.touchedAt});if(st.moveCount!==cur.moveCount)part.moveCount=st.moveCount}
+  if(col==="tasks"){const st=stampTask(cur,Object.assign({},cur,part));part=Object.assign({},part,{touchedAt:st.touchedAt});if(st.moveCount!==cur.moveCount)part.moveCount=st.moveCount;if(st.doneQ!==undefined&&st.doneQ!==cur.doneQ)part.doneQ=st.doneQ}
   const next=Object.assign({},cur,part);
   S[col].set(id,next);lsPut(col);render();
   await writeDoc(col,id,next);
@@ -449,6 +483,49 @@ async function importData(file){
 }
 
 /* ---------- task helpers ---------- */
+/* ----- priorities: Covey's time matrix (important x urgent) ----- */
+const QNAME={0:"To sort",1:"Do now",2:"Schedule",3:"Delegate or limit",4:"Drop"};
+const QLONG={0:"Not prioritised yet",1:"Important · Urgent",2:"Important · Not urgent",3:"Not important · Urgent",4:"Not important · Not urgent"};
+function importantOf(t){if(!t)return null;if(t.important===true||t.important===false)return t.important;return t.priority===1?true:null}
+function burningNow(t){return !!t&&t.status!=="done"&&t.burningOn===today()}
+function isUrgent(t){
+  if(!t||t.status==="done")return false;
+  if(burningNow(t))return true;
+  const td=today();
+  if(t.due&&(t.due<td||isOverdue(t,nowMin())))return true;
+  if(t.urgency==="yes")return true;
+  if(t.urgency==="no")return false;
+  return !!t.due&&t.due<=addDays(td,1);
+}
+function quadOf(t){const i=importantOf(t);if(i===null)return 0;const u=isUrgent(t);return i?(u?1:2):(u?3:4)}
+const QRANK={1:1,2:2,0:3,3:4,4:5};
+function prioSort(a,b){
+  const ra=burningNow(a)?0:QRANK[quadOf(a)],rb=burningNow(b)?0:QRANK[quadOf(b)];
+  if(ra!==rb)return ra-rb;
+  if((b.moveCount||0)!==(a.moveCount||0)&&ra<=2)return (b.moveCount||0)-(a.moveCount||0);
+  return sortTasks(a,b);
+}
+function qchip(t){const q=quadOf(t);return `<span class="qchip q${q}" title="${esc(QLONG[q])}">${burningNow(t)?"🔥 Q1":q?"Q"+q:"Sort"}</span>`}
+function q2cfg(){const s=S.places.get("_settings")||{};return{on:s.q2Off!==true,start:s.q2Start||"08:00",min:+s.q2Min||60}}
+function dayPlan(k){return S.days.get(k||today())||{}}
+function top3Of(k){return (dayPlan(k).top3||[]).filter(id=>{const t=S.tasks.get(id);return t})}
+function suggestTop3(){
+  const td=today(),picked=new Set(top3Of(td));
+  return tasksArr().filter(t=>t.status!=="done"&&!picked.has(t.id)&&!burningNow(t)&&!t.delegateTo&&importantOf(t)===true&&(!t.due||t.due<=addDays(td,7)))
+    .sort(prioSort).slice(0,3);
+}
+function toggleTop3(id){
+  const td=today(),cur=top3Of(td);
+  if(cur.includes(id)){save("days",td,Object.assign({},dayPlan(td),{date:td,top3:cur.filter(x=>x!==id)}));toast("Removed from today's Top 3");return}
+  if(cur.length>=3){toast("Top 3 is full. Remove one first: three is the point.");return}
+  const t=S.tasks.get(id);
+  save("days",td,Object.assign({},dayPlan(td),{date:td,top3:cur.concat(id)}));
+  if(t&&t.due!==td&&(!t.due||t.due>td))patch("tasks",id,{due:td,snoozeUntil:null});
+  toast("Added to today's Top 3");
+}
+function followupsDue(){const td=today();return tasksArr().filter(t=>t.status!=="done"&&t.delegateTo&&t.followUp&&t.followUp<=td).sort((a,b)=>a.followUp.localeCompare(b.followUp))}
+function q2Slot(){const c=q2cfg();if(!c.on)return null;const s=toMin(c.start);return s==null?null:{s,e:s+c.min}}
+
 const tasksArr=()=>[...S.tasks.entries()].map(([id,t])=>Object.assign({id},t));
 function isOverdue(t,now){
   if(t.status==="done"||!t.due)return false;
@@ -470,7 +547,8 @@ function sortTasks(a,b){
 /* Natural quick add: "Call bank tomorrow 3pm 30m !1 #work" */
 function parseQuick(text,baseDay){
   let s=" "+text+" ";const out={area:"Personal",priority:3,due:baseDay||today(),estimate:30};
-  s=s.replace(/\s!([123])(?=\s)/,(m,p)=>{out.priority=+p;return" "});
+  s=s.replace(/\s!!(?=\s)/,()=>{out.burningOn=today();out.important=true;out.priority=1;return" "});
+  s=s.replace(/\s!([123])(?=\s)/,(m,p)=>{out.priority=+p;out.important=+p<3;return" "});
   s=s.replace(/\s#(\w+)(?=\s)/,(m,a)=>{const hit=AREAS.find(x=>x.toLowerCase().startsWith(a.toLowerCase()));out.area=hit||a[0].toUpperCase()+a.slice(1);return" "});
   s=s.replace(/\s(\d+(?:\.\d+)?)\s?(h|hr|hrs|m|min|mins)(?=\s)/i,(m,n,u)=>{out.estimate=Math.round(/^h/i.test(u)?n*60:+n);return" "});
   s=s.replace(/\s(?:at\s)?(\d{1,2})(?::(\d{2}))?\s?(am|pm)(?=\s)/i,(m,h,mm,ap)=>{h=+h%12+(ap.toLowerCase()==="pm"?12:0);out.start=pad(h)+":"+(mm||"00");out.dueTime=out.start;return" "});
@@ -480,6 +558,7 @@ function parseQuick(text,baseDay){
   s=s.replace(/\s(?:on\s|next\s)?(mon|tue|wed|thu|fri|sat|sun)[a-z]*(?=\s)/i,(m,d)=>{
     const idx=["sun","mon","tue","wed","thu","fri","sat"].indexOf(d.toLowerCase());
     const cur=new Date().getDay();let diff=(idx-cur+7)%7;if(diff===0)diff=7;out.due=addDays(today(),diff);return" "});
+  if(out.burningOn)out.due=today();
   out.title=s.replace(/\s+/g," ").trim();
   return out;
 }
@@ -487,7 +566,7 @@ function parseQuick(text,baseDay){
 /* ---------- UI state ---------- */
 let tab="today";
 try{const h=location.hash.slice(1);if(["today","tasks","tour","habits","focus","review"].includes(h))tab=h}catch(e){}
-let viewDay=today(), taskFilter="active", reviewStep=0, reviewDraft=null, pendingRender=false;
+let viewDay=today(), taskFilter="matrix", reviewStep=0, reviewDraft=null, pendingRender=false;
 
 function setTab(t){tab=t;try{history.replaceState(null,"","#"+t)}catch(e){}render();window.scrollTo(0,0)}
 document.querySelectorAll("nav.tabs button").forEach(b=>b.addEventListener("click",()=>setTab(b.dataset.tab)));
@@ -567,7 +646,7 @@ const followupsOf=id=>tasksArr().filter(x=>x.tourId===id);
 const numOrNull=v=>{v=String(v||"").trim().replace(/[^\d.]/g,"");return v===""?null:+v};
 function tourActs(){const s=S.places.get("_settings");return ACTS.concat((s&&s.acts)||[]).filter((a,i,arr)=>arr.indexOf(a)===i)}
 function placeNames(){return [...S.places.entries()].filter(([k])=>k[0]!=="_").sort((a,b)=>(b[1].uses||0)-(a[1].uses||0)).map(([,p])=>p.name).filter(Boolean)}
-function stampTask(cur,next){next.touchedAt=Date.now();if(cur&&cur.due&&next.due&&next.due>cur.due&&cur.status!=="done")next.moveCount=(cur.moveCount||0)+1;return next}
+function stampTask(cur,next){next.touchedAt=Date.now();if(next.status==="done"&&(!cur||cur.status!=="done"))next.doneQ=quadOf(Object.assign({},next,{status:"open"}));if(cur&&cur.due&&next.due&&next.due>cur.due&&cur.status!=="done")next.moveCount=(cur.moveCount||0)+1;return next}
 function staleDays(t){if(t.status==="done")return 0;const last=t.touchedAt||t.createdAt||Date.now();return Math.floor((Date.now()-last)/864e5)}
 function isStale(t,now){return t.status!=="done"&&!isOverdue(t,now)&&staleDays(t)>=STALE_DAYS}
 function patchStop(tid,sid,part){const t=S.tours.get(tid);if(!t)return;patch("tours",tid,{stops:stopsOfTour(t).map(s=>s.id===sid?Object.assign({},s,part):s)})}
@@ -743,6 +822,28 @@ function openCloseDay(){
   };
 }
 
+/* ----- Today's plan: burning, Top 3 (80/20), Q2 block ----- */
+function planHTML(){
+  const td=today(),now=nowMin(),hr=new Date().getHours();
+  const burning=tasksArr().filter(burningNow).sort(prioSort);
+  const top=top3Of(td).map(id=>Object.assign({id},S.tasks.get(id)));
+  const doneN=top.filter(t=>t.status==="done").length;
+  const sug=top.length<3?suggestTop3().slice(0,3-top.length):[];
+  const unsorted=tasksArr().filter(t=>t.status!=="done"&&quadOf(t)===0).length;
+  const c=q2cfg(),q2=q2Slot();
+  const q2tasks=tasksArr().filter(t=>t.status!=="done"&&t.due===td&&quadOf(t)===2);
+  let h=`<section class="panel plan" aria-labelledby="plan-h"><div class="spread"><h2 id="plan-h">Today's plan</h2><span class="muted" style="font-size:.82rem">${top.length?`Top 3: ${doneN}/${top.length} done`:"80/20: a few tasks carry the day"}</span></div>`;
+  if(burning.length)h+=burning.map(t=>`<div class="burn"><span aria-hidden="true">🔥</span><div style="flex:1;min-width:0"><b style="overflow-wrap:anywhere">${esc(t.title)}</b><div class="muted" style="font-size:.8rem">Burning today · above everything else</div></div><button class="small primary" data-act="done" data-id="${t.id}">Done</button></div>`).join("");
+  h+=`<div class="eyebrow" style="margin-top:6px">Today's Top 3</div>`;
+  h+=top.length?`<div>${top.map(t=>taskRow(t,now,`<button class="small ghost" data-top3="${t.id}" aria-label="Remove from Top 3">✕</button>`)).join("")}</div>`
+    :`<div class="muted" style="font-size:.9rem">${hr<12?"Before calls and email: pick the 3 tasks that would make today a success, even if nothing else gets done.":"No Top 3 picked today. Pick up to 3 now. It still helps for the rest of the day."}</div>`;
+  if(sug.length)h+=`<div style="margin-top:6px"><div class="hint">Suggested from Q1, then Q2 (important first, then the ones you keep moving):</div>${sug.map(t=>`<div class="sug">${qchip(t)}<span style="flex:1;min-width:0;overflow-wrap:anywhere">${esc(t.title)}${t.due?` <span class="muted" style="font-size:.8rem">· ${esc(relDate(t.due))}</span>`:""}</span><button class="small" data-top3="${t.id}">★ Add</button></div>`).join("")}${!top.length&&sug.length>1?`<button class="small primary" data-top3all="1" style="margin-top:6px">Use these ${sug.length}</button>`:""}</div>`;
+  else if(!top.length)h+=`<div class="hint" style="margin-top:6px">${unsorted?`No important tasks yet. ${unsorted} task${unsorted===1?" isn't":"s aren't"} sorted: <button class="small" data-tabgo="tasks" data-filter="matrix">Sort them</button>`:"Mark tasks as important (Tasks › Matrix) and they'll be suggested here."}</div>`;
+  h+=`<div class="spread" style="margin-top:10px;border-top:1px solid var(--line);padding-top:10px;gap:8px"><div style="min-width:0;flex:1 1 220px"><b>Q2 block</b> <span class="muted" style="font-size:.86rem">${q2?`${esc(fmt12(fromMin(q2.s)))}–${esc(fmt12(fromMin(q2.e)))} · time for important, not urgent work${q2tasks.length?` · ${q2tasks.length} Q2 task${q2tasks.length===1?"":"s"} today`:""}`:"Off"}</span></div>
+    <div class="row" style="gap:6px"><input data-q2cfg="q2Start" aria-label="Q2 block start" value="${esc(fmt12(c.start))}" style="width:6.5rem"><select data-q2cfg="q2Min" aria-label="Q2 block length" style="width:auto">${[30,45,60,90,120].map(m=>`<option value="${m}" ${m===c.min?"selected":""}>${fmtDur(m)}</option>`).join("")}</select><button class="small ghost" data-q2toggle="1">${c.on?"Turn off":"Turn on"}</button></div></div>`;
+  return h+`</section>`;
+}
+
 /* ----- Today's record ----- */
 function recordHTML(){
   const td=today(),ev=[];
@@ -785,9 +886,25 @@ function trackRecordHTML(){
   const top=Object.entries(cnt).sort((a,b)=>b[1]-a[1])[0];
   if(top)ins.push(["pattern",`Most common blocker: ${top[0]} (${top[1]} of ${recent.length} closed day${recent.length===1?"":"s"})`,"Plan around it, for example a daily buffer block."]);
   if(rows[0].closedN<rows[0].elapsed)ins.push(["pattern",`Days closed this week: ${rows[0].closedN} of ${rows[0].elapsed}`,"Days you don't close are where tasks start drifting."]);
+  const qw=[0,1].map(i=>{const ws=addDays(weekStart(td),-7*i),we=addDays(ws,7),inW=k=>!!k&&k>=ws&&k<we;
+    const done=all.filter(t=>t.status==="done"&&t.doneAt&&inW(dayOf(t.doneAt)));const c={0:0,1:0,2:0,3:0,4:0};done.forEach(t=>c[t.doneQ===undefined?0:t.doneQ]++);
+    const sorted=c[1]+c[2]+c[3]+c[4];
+    const days=[...S.days.values()].filter(d=>inW(d.date)&&(d.top3||[]).length);let picks=0,hits=0;
+    days.forEach(d=>d.top3.forEach(id=>{picks++;const t=S.tasks.get(id);if(t&&t.status==="done"&&t.doneAt&&dayOf(t.doneAt)===d.date)hits++}));
+    return{ws,c,sorted,total:done.length,days:days.length,picks,hits}});
+  const w0=qw[0],pc=q=>w0.sorted?Math.round(w0.c[q]/w0.sorted*100):0;
+  if(w0.sorted>=4&&pc(2)<25)ins.push(["watch",`Q2 is starved: only ${pc(2)}% of what you finished this week was important-but-not-urgent work`,"Protect your Q2 block on Today before meetings and calls fill it."]);
+  if(w0.sorted>=4&&pc(1)>50)ins.push(["pattern",`Firefighting: ${pc(1)}% of finished work this week was Q1`,"Most Q1 is Q2 that waited too long. Plan steps and dates earlier."]);
+  if(w0.sorted>=4&&pc(3)+pc(4)>30)ins.push(["watch",`${pc(3)+pc(4)}% of finished work this week wasn't important (Q3 + Q4)`,"Delegate, batch or drop it, and give that time to Q2."]);
+  const unsortedN=all.filter(t=>t.status!=="done"&&quadOf(t)===0).length;
+  if(unsortedN>=5)ins.push(["watch",`${unsortedN} open tasks aren't prioritised yet`,"Sort them on Tasks › Matrix: one tap each."]);
+  if(w0.picks>=3&&w0.hits/w0.picks<0.6)ins.push(["pattern",`Top 3 done on the day: ${w0.hits} of ${w0.picks} this week`,"Pick fewer or smaller Top 3 tasks, and do them before anything else."]);
+  const qMix=`<div class="eyebrow" style="margin-top:6px">Where your effort went · finished tasks by quadrant</div>
+   ${qw.map((w,i)=>{const n=w.sorted;return `<div class="qrow"><span class="wk">${i?"Last week":"This week"}</span><div class="qbar" role="img" aria-label="${[1,2,3,4].map(q=>`Q${q} ${w.c[q]}`).join(", ")}">${n?[1,2,3,4].map(q=>w.c[q]?`<i class="b${q}" style="width:${w.c[q]/n*100}%"></i>`:"").join(""):""}</div><span class="mono" style="font-size:.78rem;white-space:nowrap">${n?"Q2 "+Math.round(w.c[2]/n*100)+"%":"–"}</span></div><div class="muted" style="font-size:.78rem;margin:-2px 0 4px 5.4rem">${w.total} done${w.c[0]?` (${w.c[0]} not sorted)`:""}${w.picks?` · Top 3 hit ${w.hits}/${w.picks} on ${w.days} day${w.days===1?"":"s"}`:" · no Top 3 picked"}</div>`}).join("")}
+   <div class="qleg"><span><b style="background:var(--late)"></b>Q1 do now</span><span><b style="background:var(--ok)"></b>Q2 schedule (aim for the biggest share)</span><span><b style="background:var(--warn)"></b>Q3 delegate</span><span><b style="background:var(--muted)"></b>Q4 drop</span></div>`;
   const tag={now:["Now",""],watch:["Watch","warn"],pattern:["Pattern","info"]};
   return `<section class="panel"><h2>Track record</h2>
-   <div class="trackwrap"><table class="track"><thead><tr><th>Week of</th><th>Tasks done</th><th>On time</th><th>Days closed</th><th>Tour km</th><th>Follow-ups done</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(prettyDate(r.ws).replace(/^\w+, /,""))}</td><td>${r.done}</td><td>${r.onTime}</td><td>${r.closedN}/${r.elapsed}</td><td>${r.km}</td><td>${r.fu}</td></tr>`).join("")}</tbody></table></div>
+   <div class="trackwrap"><table class="track"><thead><tr><th>Week of</th><th>Tasks done</th><th>On time</th><th>Days closed</th><th>Tour km</th><th>Follow-ups done</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(prettyDate(r.ws).replace(/^\w+, /,""))}</td><td>${r.done}</td><td>${r.onTime}</td><td>${r.closedN}/${r.elapsed}</td><td>${r.km}</td><td>${r.fu}</td></tr>`).join("")}</tbody></table></div>${qMix}
    <div class="eyebrow" style="margin-top:6px">Where you're slipping</div>
    <div>${ins.length?ins.map(([k,a,b])=>`<div class="insight"><span class="sev ${tag[k][1]==="warn"?"warn":""}" style="${tag[k][1]==="info"?"background:var(--accent-soft);color:var(--accent)":""}">${tag[k][0]}</span><div style="min-width:0"><div style="overflow-wrap:anywhere">${esc(a)}</div><div class="muted" style="font-size:.84rem">${esc(b)}</div></div></div>`).join(""):`<div class="empty">Nothing slipping right now.</div>`}</div></section>`;
 }
@@ -881,8 +998,9 @@ function claimSettingsHTML(){const c=claimCfg();
 /* ---------- TODAY ---------- */
 function viewToday(){
   const td=today(),now=nowMin(),all=tasksArr();
-  const overdue=all.filter(t=>isOverdue(t,now)).sort(sortTasks);
+  const overdue=all.filter(t=>isOverdue(t,now)).sort(prioSort);
   const lateItems=all.flatMap(t=>lateSteps(t).map(s=>({t,s}))),nLate=overdue.length+lateItems.length;
+  const fuDue=followupsDue();
   const dueToday=all.filter(t=>t.due===td&&t.status!=="done");
   const focusToday=(S.focus.get(td)||{}).minutes||0;
   const habits=[...S.habits.entries()];
@@ -903,7 +1021,7 @@ function viewToday(){
 
   const stale=all.filter(t=>isStale(t,now)).sort((a,b)=>staleDays(b)-staleDays(a));
   const incT=toursArr().filter(t=>(t.date||"")>=addDays(td,-14)&&tourIssues(t).length).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
-  if(nLate||stale.length||incT.length){
+  if(nLate||stale.length||incT.length||fuDue.length){
     h+=`<section class="panel attention" aria-labelledby="att-h"><div class="spread"><h2 id="att-h">Needs attention</h2><span class="eyebrow">Reminders repeat until closed</span></div>`;
     overdue.slice(0,6).forEach(t=>{
       const n=t.remindCount||0;const snoozed=t.snoozeUntil&&t.snoozeUntil>Date.now();
@@ -918,6 +1036,12 @@ function viewToday(){
         <div class="att-title">${esc(s.title)}</div>
         <div class="meta"><span>Step ${stepsOf(t).indexOf(s)+1} of ${p.total} in: ${esc(t.title)}</span></div>
         <div class="row"><button class="small primary" data-step="${t.id}|${s.id}">Step done</button><button class="small" data-stepmove="${t.id}|${s.id}" data-to="tomorrow">Move to tomorrow</button></div>
+      </div></div>`});
+    fuDue.slice(0,4).forEach(t=>{
+      h+=`<div class="att-item"><span class="sev warn">Follow up</span><div class="att-body">
+        <div class="att-title">${esc(t.title)}</div>
+        <div class="meta"><span>Delegated to ${esc(t.delegateTo)}</span><span>Follow-up ${esc(relDate(t.followUp).toLowerCase())}</span></div>
+        <div class="row"><button class="small primary" data-act="done" data-id="${t.id}">It's done</button><button class="small" data-fu="${t.id}">Chased · check again in 3 days</button></div>
       </div></div>`});
     incT.slice(0,3).forEach(t=>{const is=tourIssues(t);
       h+=`<div class="att-item"><span class="sev warn">Trip details</span><div class="att-body">
@@ -935,17 +1059,20 @@ function viewToday(){
     h+=`</section>`;
   }
 
-  if(rev&&rev.top3&&rev.top3.filter(Boolean).length){
+  h+=planHTML();
+  if(rev&&rev.rocks&&(rev.rocks.work||[]).concat(rev.rocks.personal||[]).filter(Boolean).length){
+    h+=`<section class="panel top3"><div class="eyebrow">This week's big rocks</div>${[["work","Work (office & tour)"],["personal","Personal (family & health)"]].map(([k,l])=>(rev.rocks[k]||[]).filter(Boolean).length?`<div style="margin-top:4px"><b style="font-size:.86rem">${l}</b><ol>${rev.rocks[k].filter(Boolean).map(x=>`<li>${esc(x)}</li>`).join("")}</ol></div>`:"").join("")}</section>`;
+  }else if(rev&&rev.top3&&rev.top3.filter(Boolean).length){
     h+=`<section class="panel top3"><div class="eyebrow">This week's top 3</div><ol>${rev.top3.filter(Boolean).map(x=>`<li>${esc(x)}</li>`).join("")}</ol></section>`;
   }
 
   h+=`<section class="panel"><form class="qa" id="qa-form"><input id="qa" placeholder="Add a task… e.g. Call bank tomorrow 3pm 30m !1 #work" autocomplete="off" aria-label="Quick add task"><button class="primary" type="submit">Add</button></form>
-  <div class="hint">Type <code>tomorrow</code>, <code>fri</code>, <code>3pm</code>, <code>45m</code>, <code>!1</code> for priority and <code>#work</code> for area. A time puts it on the timeline.</div></section>`;
+  <div class="hint">Type <code>tomorrow</code>, <code>fri</code>, <code>3pm</code>, <code>45m</code>, <code>#work</code>. Priority: <code>!1</code> or <code>!2</code> = important, <code>!3</code> = not important, <code>!!</code> = 🔥 burning today. Urgency comes from the due date.</div></section>`;
 
   // timeline
   const dayTasks=all.filter(t=>t.due===viewDay);
   const blocks=dayTasks.filter(t=>t.start).map(t=>({t,s:toMin(t.start),e:toMin(t.start)+(t.estimate||30)})).sort((a,b)=>a.s-b.s);
-  const unplaced=dayTasks.filter(t=>!t.start&&t.status!=="done").sort(sortTasks);
+  const unplaced=dayTasks.filter(t=>!t.start&&t.status!=="done").sort(prioSort);
   const planned=dayTasks.filter(t=>t.status!=="done").reduce((a,t)=>a+(t.estimate||30),0);
   const avail=viewDay===td?Math.max(0,DAY_END-Math.max(now,DAY_START)):(DAY_END-DAY_START);
   const pct=avail?Math.min(100,Math.round(planned/avail*100)):100;
@@ -959,12 +1086,13 @@ function viewToday(){
     const late=isOverdue(b.t,now);
     bl+=`<button class="block ${b.t.status==="done"?"done":""} ${late?"late":""}" data-edit="${b.t.id}" style="top:${top}px;height:${ht}px;left:calc(${b.lane}*100%/${nl} + 4px);right:auto;width:calc(100%/${nl} - 8px)"><span class="t">${esc(b.t.title)}</span><span class="m">${fromMin(b.s)}–${fromMin(b.e)}${stepProgress(b.t)?` · ${stepProgress(b.t).done}/${stepProgress(b.t).total} steps`:""}</span></button>`;
   });
+  const q2=q2Slot();if(q2&&q2.e>DAY_START){const qs=Math.max(q2.s,DAY_START);bl=`<div class="q2band" style="top:${(qs-DAY_START)/60*H}px;height:${(q2.e-qs)/60*H}px">Q2 block · important, not urgent</div>`+bl}
   if(viewDay===td&&now>=DAY_START)bl+=`<div class="nowline" style="top:${(now-DAY_START)/60*H}px" aria-hidden="true"></div>`;
   h+=`<section class="panel" aria-labelledby="tl-h">
     <div class="spread"><h2 id="tl-h">${esc(relDate(viewDay))}</h2>
       <div class="daynav"><button class="small" data-day="-1" aria-label="Previous day">‹</button><button class="small" data-day="0">Today</button><button class="small" data-day="1" aria-label="Next day">›</button></div></div>
     <div class="load"><div class="spread"><span>Planned ${fmtDur(planned)} of ${fmtDur(avail)} free</span><span class="mono">${pct}%</span></div><div class="load-bar"><i class="${planned>avail?"over":""}" style="width:${pct}%"></i></div>${planned>avail?`<div style="color:var(--late);margin-top:4px">This day doesn't fit. Move something.</div>`:""}</div>
-    ${unplaced.length?`<div><div class="eyebrow" style="margin-bottom:4px">Not on the timeline</div>${unplaced.map(t=>taskRow(t,now,`<button class="small" data-place="${t.id}">Place</button>`)).join("")}</div>`:""}
+    ${unplaced.length?`<div><div class="eyebrow" style="margin-bottom:4px">Not on the timeline · most important first</div>${unplaced.map(t=>taskRow(t,now,`<button class="small" data-place="${t.id}">${quadOf(t)===2&&q2Slot()?"Place in Q2 block":"Place"}</button>`)).join("")}</div>`:""}
     <div class="timeline" id="tl"><div class="hours">${hours}</div><div class="lane" style="height:${(DAY_END-DAY_START)/60*H}px">${bl}</div></div>
     ${!dayTasks.length?`<div class="empty">Nothing planned for ${esc(relDate(viewDay).toLowerCase())}. Add a task with a time to block it out.</div>`:""}
   </section>`;
@@ -986,11 +1114,12 @@ function scrollTimeline(){const tl=$("#tl");if(!tl)return;const m=viewDay===toda
 /* ---------- TASKS ---------- */
 function viewTasks(){
   const now=nowMin(),td=today();let list=tasksArr();
+  if(taskFilter==="matrix")return viewMatrix();
   const F={active:t=>t.status!=="done",today:t=>t.status!=="done"&&t.due===td,upcoming:t=>t.status!=="done"&&t.due>td,overdue:t=>isOverdue(t,now),someday:t=>t.status!=="done"&&!t.due,done:t=>t.status==="done"};
-  list=list.filter(F[taskFilter]).sort(taskFilter==="done"?(a,b)=>(b.doneAt||0)-(a.doneAt||0):sortTasks);
-  const labels={active:"All open",today:"Today",upcoming:"Upcoming",overdue:"Overdue",someday:"No date",done:"Done"};
+  list=list.filter(F[taskFilter]).sort(taskFilter==="done"?(a,b)=>(b.doneAt||0)-(a.doneAt||0):taskFilter==="upcoming"?sortTasks:prioSort);
+  const labels={matrix:"Matrix",active:"All open",today:"Today",upcoming:"Upcoming",overdue:"Overdue",someday:"No date",done:"Done"};
   let h=`<header class="spread"><h1>Tasks</h1><button class="primary" data-new="1">New task</button></header>
-  <div class="filters" role="toolbar" aria-label="Filter tasks">${Object.keys(labels).map(k=>`<button class="small" data-filter="${k}" aria-pressed="${k===taskFilter}">${labels[k]}</button>`).join("")}</div>`;
+  <div class="filters" role="toolbar" aria-label="Filter tasks">${Object.keys(TASK_LABELS).map(k=>`<button class="small" data-filter="${k}" aria-pressed="${k===taskFilter}">${TASK_LABELS[k]}</button>`).join("")}</div>`;
   if(!list.length){h+=`<section class="panel"><div class="empty">${taskFilter==="overdue"?"Nothing overdue. Nice.":"No tasks here yet. Add one with New task, or type into Quick add on Today."}</div></section>`;return h+tplSection()}
   const groups={};list.forEach(t=>{const g=t.area||"Other";(groups[g]=groups[g]||[]).push(t)});
   Object.keys(groups).sort().forEach(g=>{
@@ -999,10 +1128,35 @@ function viewTasks(){
   if(taskFilter==="done"&&list.length)h+=`<button class="small danger" id="clear-done">Delete done tasks older than 30 days</button>`;
   return h+tplSection();
 }
+const TASK_LABELS={matrix:"Matrix",active:"All open",today:"Today",upcoming:"Upcoming",overdue:"Overdue",someday:"No date",done:"Done"};
+function guideHTML(){return `<details class="panel guide"><summary>How to prioritise: Covey's matrix + 80/20</summary>
+  <div class="qgrid"><div class="g1"><b>Q1 · Do now</b><br>Important + urgent: crises, deadlines, burning issues.</div><div class="g2"><b>Q2 · Schedule</b><br>Important, not urgent: planning, steps, follow-ups, prevention, people, health.</div><div class="g3"><b>Q3 · Delegate or limit</b><br>Urgent, not important: most interruptions, others' asks, some calls.</div><div class="g4"><b>Q4 · Drop</b><br>Neither: busywork, time-fillers.</div></div>
+  <ul><li><b>Live in Q2.</b> Most Q1 crises are Q2 work that waited too long. Your Q2 block on Today protects time for it.</li>
+  <li><b>Urgency is automatic:</b> overdue, or due today or tomorrow. You decide only <i>important?</i> Override in the task if needed, and use 🔥 Burning for issues that come up on the day.</li>
+  <li><b>80/20:</b> about 20% of tasks bring 80% of the results. Each morning pick a Top 3 and do them first, before calls and email.</li>
+  <li><b>Be honest about "important":</b> if everything is Q1, nothing is. Ask: if I never did this, would my results or my boss notice?</li>
+  <li><b>Q3:</b> delegate it with a follow-up date, so it doesn't vanish. <b>Q4:</b> drop it without guilt.</li>
+  <li><b>Eat the frog:</b> do the hardest Top 3 task first. Under 2 minutes? Do it now, don't track it.</li></ul></details>`}
+function viewMatrix(){
+  const now=nowMin(),open=tasksArr().filter(t=>t.status!=="done");
+  const by={0:[],1:[],2:[],3:[],4:[]};open.forEach(t=>by[quadOf(t)].push(t));Object.values(by).forEach(l=>l.sort(prioSort));
+  const top=new Set(top3Of());
+  const act=(t,q)=>q===0?`<button class="small" data-setimp="${t.id}|1">Important</button><button class="small ghost" data-setimp="${t.id}|0">Not</button>`
+    :q===1||q===2?`<button class="small ${top.has(t.id)?"primary":""}" data-top3="${t.id}" aria-label="${top.has(t.id)?"Remove from":"Add to"} today's Top 3">${top.has(t.id)?"★":"☆"} Top 3</button>`
+    :q===3?(t.delegateTo?"":`<button class="small" data-edit="${t.id}">Delegate</button>`)
+    :`<button class="small danger" data-qdrop="${t.id}">Drop</button>`;
+  let h=`<header class="spread"><h1>Tasks</h1><button class="primary" data-new="1">New task</button></header>
+  <div class="filters" role="toolbar" aria-label="Filter tasks">${Object.keys(TASK_LABELS).map(k=>`<button class="small" data-filter="${k}" aria-pressed="${k===taskFilter}">${TASK_LABELS[k]}</button>`).join("")}</div>`+guideHTML();
+  if(by[0].length)h+=`<section class="panel" style="border-left:4px dashed var(--line)"><div class="qhead"><h2>To sort · ${by[0].length}</h2><span class="qsub">One tap each: is it important?</span></div><div>${by[0].map(t=>taskRow(t,now,act(t,0))).join("")}</div></section>`;
+  const tips={1:"Do these today. Keep this box small by planning Q2 work early.",2:"Your most valuable work. Put it in the Q2 block before the day fills up.",3:"Delegate, batch or keep short. Each delegated task gets a follow-up date.",4:"Drop these, or keep them for idle time."};
+  h+=`<div class="matrix">${[1,2,3,4].map(q=>`<section class="panel mq${q}"><div class="qhead"><h2>Q${q} · ${QNAME[q]} <span class="muted" style="font-weight:400">${by[q].length}</span></h2><span class="qsub">${QLONG[q]}</span></div><div class="hint">${tips[q]}</div><div>${by[q].length?by[q].map(t=>taskRow(t,now,act(t,q))).join(""):`<div class="empty">Empty</div>`}</div></section>`).join("")}</div>`;
+  if(!open.length)h+=`<section class="panel"><div class="empty">No open tasks. Add one with New task, or type into Quick add on Today.</div></section>`;
+  return h+tplSection();
+}
 function taskRow(t,now,extra){
   const late=isOverdue(t,now),p=stepProgress(t),open=openSteps.has(t.id),ls=lateSteps(t);
   return `<div class="task ${t.status==="done"?"done":""}"><button class="check p${t.priority||3} ${t.status==="done"?"on":""}" data-toggle="${t.id}" aria-label="${t.status==="done"?"Reopen":"Mark done"}"></button>
-  <button class="task-main" data-edit="${t.id}"><span class="task-title">${esc(t.title)}</span><span class="meta">${t.due?`<span class="${late?"late":""}">${esc(relDate(t.due))}${t.start?" "+t.start:t.dueTime?" "+t.dueTime:""}${late?" · "+esc(overdueLabel(t)):""}</span>`:"<span>No date</span>"}${progressHTML(t)}${!open&&nextStep(t)?`<span>Next: ${esc(nextStep(t).title)}</span>`:""}${ls.length?`<span class="late">${ls.length} late step${ls.length===1?"":"s"}</span>`:""}${t.moveCount>=2&&t.status!=="done"?`<span class="late">Moved ${t.moveCount}×</span>`:""}${t.tourId?`<span>Tour follow-up</span>`:""}<span>${fmtDur(t.estimate||30)}</span>${t.focusMin?`<span>${t.focusMin}m focused</span>`:""}${t.remindCount&&t.status!=="done"?`<span>Reminded ${t.remindCount}×</span>`:""}</span></button>${p?`<button class="small ghost" data-steps="${t.id}" aria-expanded="${open}">${open?"Hide steps":"Steps"}</button>`:""}${extra||""}</div>${p&&open?stepListHTML(t):""}`;
+  <button class="task-main" data-edit="${t.id}"><span class="task-title">${esc(t.title)}</span><span class="meta">${t.status!=="done"?qchip(t):""}${t.delegateTo?`<span>→ ${esc(t.delegateTo)}${t.followUp?" · follow up "+esc(relDate(t.followUp).toLowerCase()):""}</span>`:""}${top3Of().includes(t.id)&&t.status!=="done"?`<span>★ Top 3</span>`:""}${t.due?`<span class="${late?"late":""}">${esc(relDate(t.due))}${t.start?" "+t.start:t.dueTime?" "+t.dueTime:""}${late?" · "+esc(overdueLabel(t)):""}</span>`:"<span>No date</span>"}${progressHTML(t)}${!open&&nextStep(t)?`<span>Next: ${esc(nextStep(t).title)}</span>`:""}${ls.length?`<span class="late">${ls.length} late step${ls.length===1?"":"s"}</span>`:""}${t.moveCount>=2&&t.status!=="done"?`<span class="late">Moved ${t.moveCount}×</span>`:""}${t.tourId?`<span>Tour follow-up</span>`:""}<span>${fmtDur(t.estimate||30)}</span>${t.focusMin?`<span>${t.focusMin}m focused</span>`:""}${t.remindCount&&t.status!=="done"?`<span>Reminded ${t.remindCount}×</span>`:""}</span></button>${p?`<button class="small ghost" data-steps="${t.id}" aria-expanded="${open}">${open?"Hide steps":"Steps"}</button>`:""}${extra||""}</div>${p&&open?stepListHTML(t):""}`;
 }
 
 /* ---------- task sheet ---------- */
@@ -1015,9 +1169,17 @@ function openTask(id,preset){
     <div class="spread"><h2 id="sheet-h">${id?"Edit task":"New task"}</h2><button type="button" class="small ghost" id="tclose">Close</button></div>
     ${id?`<div class="spread" style="background:var(--sunk);border-radius:10px;padding:8px 10px"><span>Status: <b>${t.status==="done"?"Done":"Open"}</b></span><button type="button" class="small" id="tstatus">${t.status==="done"?"Mark as not done":"Mark as done"}</button></div>`:""}
     <label class="field">Task<input id="f-title" required value="${esc(t.title)}" placeholder="What needs doing?"></label>
+    <div class="fieldset"><span>Priority <span id="f-qchip"></span></span>
+      <div class="seg" role="group" aria-label="Important?"><span class="seg-l">Important?</span><button type="button" data-imp="1">Yes</button><button type="button" data-imp="0">No</button></div>
+      <div class="hint" style="margin-top:-2px">Important = it moves your goals or your role forward. Ask: if I never did it, would anyone notice?</div>
+      <div class="seg" role="group" aria-label="Urgent?"><span class="seg-l">Urgent?</span><button type="button" data-urg="auto">Auto</button><button type="button" data-urg="yes">Yes</button><button type="button" data-urg="no">No</button></div>
+      <label class="row" style="gap:8px;font-size:.92rem"><input type="checkbox" id="f-burn" style="width:auto;min-height:0" ${burningNow(t)?"checked":""}> 🔥 Burning today: put it above everything else</label>
+      <label class="row" style="gap:8px;font-size:.92rem"><input type="checkbox" id="f-top3" style="width:auto;min-height:0" ${id&&top3Of().includes(id)?"checked":""}> ★ One of today's Top 3</label>
+      <div class="grid2"><label class="field">Delegated to (optional)<input id="f-dto" autocomplete="off" placeholder="Name" value="${esc(t.delegateTo||"")}"></label><label class="field">Follow up on<input type="date" id="f-dfu" value="${esc(t.followUp||"")}"></label></div>
+      <div class="hint" id="f-qhint"></div>
+    </div>
     <div class="grid2">
       <label class="field">Area<select id="f-area">${[...new Set(AREAS.concat(t.area?[t.area]:[]))].map(a=>`<option ${a===t.area?"selected":""}>${esc(a)}</option>`).join("")}</select></label>
-      <label class="field">Priority<select id="f-pri"><option value="1" ${t.priority==1?"selected":""}>1 · Must</option><option value="2" ${t.priority==2?"selected":""}>2 · Should</option><option value="3" ${t.priority==3?"selected":""}>3 · Could</option></select></label>
       <label class="field">Due date<input type="date" id="f-due" value="${esc(t.due||"")}"></label>
       <label class="field">Due by (time)<input id="f-duet" autocomplete="off" placeholder="e.g. 3pm" value="${esc(fmt12(t.dueTime))}"></label>
       <label class="field">Block start<input id="f-start" autocomplete="off" placeholder="e.g. 2:30pm" value="${esc(fmt12(t.start))}"></label>
@@ -1037,6 +1199,18 @@ function openTask(id,preset){
   sh.hidden=false;setTimeout(()=>{const f=$("#f-title");if(!id&&f)f.focus()},50);
   const close=()=>{sh.hidden=true;sh.innerHTML=""};
   $("#tclose").onclick=close;$("#tcancel").onclick=close;
+  let qImp=importantOf(t),qUrg=t.urgency==="yes"||t.urgency==="no"?t.urgency:"auto";
+  const qDraft=()=>({status:"open",important:qImp,priority:qImp===null?t.priority:undefined,urgency:qUrg,burningOn:$("#f-burn").checked?today():null,due:$("#f-due").value||null,dueTime:parseTime($("#f-duet").value)||null});
+  const QHINT={0:"Choose Important Yes or No so Daybook can rank this task.",1:"Q1 · Do it now, or today. If Q1 keeps filling up, more of this work needs planning earlier (Q2).",2:"Q2 · The quadrant that matters most. Give it a time block (your Q2 block) before the day fills up.",3:"Q3 · Feels urgent, but it isn't yours to prioritise. Delegate it, batch it, or keep it short.",4:"Q4 · Low value. Drop it, or keep it for idle time."};
+  const drawQ=()=>{document.querySelectorAll("#tform [data-imp]").forEach(b=>b.setAttribute("aria-pressed",String(qImp!==null&&String(+qImp)===b.dataset.imp)));
+    document.querySelectorAll("#tform [data-urg]").forEach(b=>b.setAttribute("aria-pressed",String(qUrg===b.dataset.urg)));
+    const d=qDraft(),q=quadOf(d),u=isUrgent(d);
+    $("#f-qchip").innerHTML=`<span class="qchip q${q}">${q?"Q"+q+" · "+QNAME[q]:"Not sorted"}</span>`;
+    const ab=document.querySelector('#tform [data-urg="auto"]');if(ab)ab.textContent=qUrg==="auto"?`Auto: ${u?"urgent":"not urgent"}`:"Auto";
+    $("#f-qhint").textContent=QHINT[q]+(qUrg==="auto"?" Auto means urgent when overdue or due today or tomorrow.":"")};
+  $("#tform").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;if(b.dataset.imp!==undefined){qImp=b.dataset.imp==="1";drawQ()}if(b.dataset.urg){qUrg=b.dataset.urg;drawQ()}});
+  ["#f-burn","#f-due","#f-duet"].forEach(sel=>$(sel).addEventListener("change",()=>{if(sel==="#f-burn"&&$("#f-burn").checked){qImp=true;if(!$("#f-due").value||$("#f-due").value>today())$("#f-due").value=today()}drawQ()}));
+  drawQ();
   let draft=stepsOf(t).map(s=>Object.assign({},s));
   const drawSteps=()=>{
     const ed=$("#steps-ed");if(!ed)return;
@@ -1068,12 +1242,16 @@ function openTask(id,preset){
     e.preventDefault();
     const dueTime=parseTime($("#f-duet").value),start=parseTime($("#f-start").value),err=$("#f-err");
     if(dueTime===undefined||start===undefined){err.textContent="Type a time like 3pm, 3:30 pm or 15:00.";err.hidden=false;($(dueTime===undefined?"#f-duet":"#f-start")).focus();return}
-    const d=Object.assign({},t,{title:$("#f-title").value.trim(),area:$("#f-area").value,priority:+$("#f-pri").value,due:$("#f-due").value||null,dueTime,start,estimate:Math.max(5,+$("#f-est").value||30),notes:$("#f-notes").value.trim(),steps:draft.map(x=>Object.assign({},x,{title:(x.title||"").trim()})).filter(x=>x.title)});
+    const qd=qDraft(),qNow=quadOf(Object.assign({},qd,{status:"open"}));
+    const d=Object.assign({},t,{title:$("#f-title").value.trim(),area:$("#f-area").value,important:qImp,urgency:qUrg==="auto"?null:qUrg,burningOn:qd.burningOn,priority:qImp===null?(t.priority||3):qImp?(qNow===1?1:2):3,delegateTo:$("#f-dto").value.trim()||null,followUp:$("#f-dfu").value||null,due:$("#f-due").value||null,dueTime,start,estimate:Math.max(5,+$("#f-est").value||30),notes:$("#f-notes").value.trim(),steps:draft.map(x=>Object.assign({},x,{title:(x.title||"").trim()})).filter(x=>x.title)});
     if(!d.title)return;
     if(!id){d.status="open";d.createdAt=Date.now();d.remindCount=0}
     if(id&&(d.due!==t.due||d.dueTime!==t.dueTime)){d.snoozeUntil=null}
     const tid=id||uid(),wasAll=stepsOf(t).length>0&&stepsOf(t).every(x=>x.done),nowAll=d.steps.length>0&&d.steps.every(x=>x.done);
-    delete d.id;save("tasks",tid,d);close();
+    if(d.delegateTo&&!d.followUp)d.followUp=addDays(today(),3);
+    delete d.id;save("tasks",tid,d);
+    const inTop=top3Of().includes(tid),wantTop=$("#f-top3").checked;close();
+    if(wantTop!==inTop){toggleTop3(tid);return}
     if(nowAll&&!wasAll&&d.status!=="done")toast(`All ${d.steps.length} steps done. Mark the task done?`,()=>setDone(tid,true),"Mark done");else toast(id?"Saved":"Task added");
   };
 }
@@ -1135,10 +1313,22 @@ setInterval(()=>{if(T.running){if(remaining()<=0)finishSession();else if(tab==="
 setInterval(()=>{if(tab==="today"&&!$("#sheet").innerHTML)render()},60000);
 
 /* ---------- REVIEW ---------- */
+function rockDue(){const td=today(),dow=parseKey(td).getDay();return addDays(weekStart(td),(dow===0||dow>=5?7:0)+4)}
+function saveReview(){
+  const td=today(),ws=weekStart(td),k="wk-"+ws,clean=a=>a.map(x=>(x||"").trim());
+  const rocks={work:clean(reviewDraft.rocks.work),personal:clean(reviewDraft.rocks.personal)};
+  const top3=rocks.work.filter(Boolean).concat(rocks.personal.filter(Boolean)).slice(0,3);
+  let made=0;
+  if(reviewDraft.makeTasks){const due=rockDue(),have=new Set(tasksArr().filter(t=>t.rockWeek===ws).map(t=>(t.title||"").toLowerCase()));
+    [["work","Work"],["personal","Personal"]].forEach(([r,area])=>rocks[r].filter(Boolean).forEach(x=>{if(have.has(x.toLowerCase()))return;made++;
+      save("tasks",uid(),{title:x,area,important:true,priority:2,due,estimate:60,status:"open",createdAt:Date.now(),remindCount:0,rockWeek:ws,notes:"Big rock from the weekly review of "+prettyDate(ws)})}))}
+  save("reviews",k,{week:ws,rocks,top3,note:(reviewDraft.note||"").trim(),savedAt:Date.now()});
+  reviewStep=0;reviewDraft=null;toast(made?`Review saved. ${made} big rock${made===1?"":"s"} added as Q2 tasks.`:"Review saved. Your big rocks are on Today.");setTab("today");
+}
 function viewReview(){
   const td=today(),ws=weekStart(td),key="wk-"+ws;
   const prev=S.reviews.get(key);
-  if(!reviewDraft)reviewDraft={top3:(prev&&prev.top3)||["","",""],note:(prev&&prev.note)||""};
+  if(!reviewDraft){const r=(prev&&prev.rocks)||{};reviewDraft={rocks:{work:(r.work||(prev&&!prev.rocks&&prev.top3)||["","",""]).concat(["","",""]).slice(0,3),personal:(r.personal||["",""]).concat(["",""]).slice(0,2)},makeTasks:true,note:(prev&&prev.note)||""}}
   const steps=["Wins","Clear overdue","Habits","Next week"];
   const all=tasksArr(),now=nowMin();
   const weekAgo=parseKey(addDays(td,-7)).getTime();
@@ -1157,8 +1347,12 @@ function viewReview(){
     const hs=[...S.habits.values()];
     body=`<h2>Habits this week</h2>${hs.length?hs.map(x=>{const n=[...Array(7)].filter((_,i)=>x.log&&x.log[addDays(td,-i)]).length;const hit=n>=(x.target||7);return`<div class="spread" style="padding:6px 0;border-top:1px solid var(--line)"><span>${esc(x.name)}</span><span class="sev ${hit?"":"warn"}" style="${hit?"background:var(--ok-soft);color:var(--ok)":""}">${n}/${x.target||7}</span></div>`}).join(""):`<div class="empty">No habits tracked yet. You can add some on the Habits tab.</div>`}`;
   }else{
-    body=`<h2>Set next week's top 3</h2><div class="muted">Outcomes, not tasks. These show at the top of Today all week.</div>
-    ${[0,1,2].map(i=>`<label class="field">Outcome ${i+1}<input id="r-top${i}" value="${esc(reviewDraft.top3[i]||"")}" placeholder="${["e.g. Ship the Q4 budget draft","e.g. Book the dentist and car service","e.g. Run 3 times"][i]}"></label>`).join("")}
+    body=`<h2>Big rocks for next week</h2><div class="muted">Covey: put the big rocks in first, then fit everything else around them. Pick a few outcomes per role. These are your Q2 work.</div>
+    <div class="eyebrow" style="margin-top:4px">Work (office &amp; tour)</div>
+    ${[0,1,2].map(i=>`<label class="field">Rock ${i+1}<input id="r-rw${i}" value="${esc(reviewDraft.rocks.work[i]||"")}" placeholder="${["e.g. Submit October MIS and tour claims","e.g. Close all follow-ups from last week's visits","e.g. Plan steps for the R&R proposal"][i]}"></label>`).join("")}
+    <div class="eyebrow" style="margin-top:4px">Personal (family &amp; health)</div>
+    ${[0,1].map(i=>`<label class="field">Rock ${i+1}<input id="r-rp${i}" value="${esc(reviewDraft.rocks.personal[i]||"")}" placeholder="${["e.g. Walk 4 times","e.g. Sunday outing with family"][i]}"></label>`).join("")}
+    <label class="row" style="gap:8px"><input type="checkbox" id="r-mk" style="width:auto;min-height:0" ${reviewDraft.makeTasks?"checked":""}> Also add each rock as an important (Q2) task due ${esc(prettyDate(rockDue()))}</label>
     <label class="field">Note to self<textarea id="r-note" placeholder="What would make next week easier?">${esc(reviewDraft.note)}</textarea></label>`;
   }
   return `<header class="stack" style="gap:4px"><div class="eyebrow">Week of ${esc(prettyDate(ws))}${prev?" · reviewed":""}</div><h1>Weekly review</h1></header>
@@ -1203,10 +1397,17 @@ document.addEventListener("click",e=>{
   if(d.step){const[tid,sid]=d.step.split("|");const s=stepsOf(S.tasks.get(tid)).find(x=>x.id===sid);if(s)setStep(tid,sid,!s.done);return}
   if(d.stepmove){const[tid,sid]=d.stepmove.split("|");const t=S.tasks.get(tid);if(!t)return;const to=d.to==="nextweek"?addDays(weekStart(today()),7):d.to==="none"?null:addDays(today(),1);patch("tasks",tid,{steps:stepsOf(t).map(x=>x.id===sid?Object.assign({},x,{due:to}):x)});toast(to?"Step moved to "+relDate(to).toLowerCase():"Step date removed");return}
   if(d.deltpl){if(b.dataset.armed){removeDoc("templates",d.deltpl);toast("Saved list removed")}else{b.dataset.armed="1";b.textContent="Tap again";setTimeout(()=>{if(b.isConnected){delete b.dataset.armed;b.textContent="Remove"}},3000)}return}
+  if(d.top3)return toggleTop3(d.top3);
+  if(d.top3all){suggestTop3().slice(0,3).forEach(t=>toggleTop3(t.id));return}
+  if(d.setimp){const[id,v]=d.setimp.split("|");const imp=v==="1";patch("tasks",id,{important:imp,priority:imp?2:3});toast(imp?"Marked important":"Marked not important");return}
+  if(d.qdrop){if(b.dataset.armed){const t=S.tasks.get(d.qdrop);removeDoc("tasks",d.qdrop);if(t)toast("Dropped",()=>save("tasks",d.qdrop,t));}else{b.dataset.armed="1";b.textContent="Tap again";setTimeout(()=>{if(b.isConnected){delete b.dataset.armed;b.textContent="Drop"}},3000)}return}
+  if(d.fu){patch("tasks",d.fu,{followUp:addDays(today(),3),chased:(S.tasks.get(d.fu).chased||0)+1});toast("Next follow-up in 3 days");return}
+  if(d.q2toggle){const st=S.places.get("_settings")||{};save("places","_settings",Object.assign({},st,{q2Off:q2cfg().on}));toast(q2cfg().on?"Q2 block on":"Q2 block off");return}
   if(d.place){
     const t=S.tasks.get(d.place);if(!t)return;const est=t.estimate||30;
     const busy=tasksArr().filter(x=>x.due===viewDay&&x.start&&x.status!=="done").map(x=>[toMin(x.start),toMin(x.start)+(x.estimate||30)]).sort((a,b)=>a[0]-b[0]);
     let s=viewDay===today()?Math.max(DAY_START,Math.ceil(nowMin()/15)*15):9*60;
+    const q2s=q2Slot();if(quadOf(t)===2&&q2s&&q2s.s>=s)s=q2s.s;
     for(const[bs,be]of busy){if(s+est<=bs)break;if(be>s)s=Math.ceil(be/15)*15}
     if(s+est>DAY_END){toast("No free slot left on this day");return}
     patch("tasks",d.place,{start:fromMin(s)});toast("Placed at "+fromMin(s));return;
@@ -1225,15 +1426,17 @@ document.addEventListener("click",e=>{
   if(b.id==="freset"){T.running=false;T.endAt=null;T.remaining=MODES[T.mode]*60;saveT();render();return}
   if(b.id==="rnext"){reviewStep=Math.min(3,reviewStep+1);render();return}
   if(b.id==="rback"){reviewStep=Math.max(0,reviewStep-1);render();return}
-  if(b.id==="rsave"){const k="wk-"+weekStart(today());save("reviews",k,{week:weekStart(today()),top3:reviewDraft.top3.map(s=>s.trim()),note:reviewDraft.note.trim(),savedAt:Date.now()});reviewStep=0;reviewDraft=null;toast("Review saved. Your top 3 is on Today.");setTab("today");return}
+  if(b.id==="rsave")return saveReview();
   if(b.id==="clear-done"){const cut=Date.now()-30*864e5;tasksArr().filter(t=>t.status==="done"&&(t.doneAt||0)<cut).forEach(t=>removeDoc("tasks",t.id));toast("Old done tasks deleted");return}
 });
 document.addEventListener("input",e=>{
   const id=e.target.id;
-  if(/^r-top\d$/.test(id)&&reviewDraft)reviewDraft.top3[+id.slice(5)]=e.target.value;
+  if(/^r-r[wp]\d$/.test(id)&&reviewDraft)reviewDraft.rocks[id[3]==="w"?"work":"personal"][+id.slice(4)]=e.target.value;
+  if(id==="r-mk"&&reviewDraft)reviewDraft.makeTasks=e.target.checked;
   if(id==="r-note"&&reviewDraft)reviewDraft.note=e.target.value;
 });
 document.addEventListener("change",e=>{const el=e.target;if(!el.dataset)return;
+  if(el.dataset.q2cfg){const st=S.places.get("_settings")||{};let v=el.value;if(el.dataset.q2cfg==="q2Start"){v=parseTime(v);if(!v){toast("Type a time like 8am or 14:30.");render();return}}save("places","_settings",Object.assign({},st,{[el.dataset.q2cfg]:v,q2Off:false}));toast("Q2 block saved");return}
   if(el.dataset.cfg){const st=S.places.get("_settings")||{};save("places","_settings",Object.assign({},st,{[el.dataset.cfg]:el.value.trim()||null}));toast("Claim settings saved");return}
   if(el.dataset.stopf){const[tid,sid,f]=el.dataset.stopf.split("|");let v=el.value.trim();
     if(f==="arrive"||f==="depart"){const p=parseTime(v);if(p===undefined){toast("Type a time like 10:30am or 14:15.");render();return}v=p}
